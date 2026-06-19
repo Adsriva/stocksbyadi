@@ -1,0 +1,84 @@
+/**
+ * Yahoo Finance market data — current provider.
+ * Will be replaced by Angel One when credentials are configured.
+ */
+
+const YAHOO_SYM = {
+  'Dee Development':'DDEV.NS','Techno Electric':'TECHNOE.NS','Wabag':'WABAG.NS',
+  'Amber':'AMBER.NS','Capri Global':'CGCL.NS','BEML':'BEML.NS','Kernex':'KERNEX.NS',
+  'ITD Cementation':'ITDCEM.NS','Genus Power':'GENUSPOWER.NS','Ami Organics':'AMIORG.NS',
+  'JG Chemicals':'JGCHEM.NS','Jost':'JOSTCORP.NS','Pricol':'PRICOLLTD.NS',
+  'RITES':'RITES.NS','Kaynes Technology':'KAYNES.NS','Dixon Technologies':'DIXON.NS',
+  'Suzlon Energy':'SUZLON.NS','IREDA':'IREDA.NS','RVNL':'RVNL.NS',
+  'Titagarh Rail':'TWL.NS','Anupam Rasayan':'ANUPAMRAS.NS','Clean Science':'CLEANSCIENCE.NS',
+  'Navin Fluorine':'NAVINFLUOR.NS','Sona Comstar':'SONACOMS.NS','Minda Industries':'MINDAIND.NS',
+  'KPIT Technologies':'KPITTECH.NS','Persistent Systems':'PERSISTENT.NS','Coforge':'COFORGE.NS',
+  'Tata Elxsi':'TATAELXSI.NS','Apar Industries':'APARINDS.NS','KEI Industries':'KEI.NS',
+  'Polycab':'POLYCAB.NS','ABB India':'ABB.NS','Siemens India':'SIEMENS.NS',
+  'J Kumar Infra':'JKUMAR.NS','NCC':'NCC.NS','KNR Constructions':'KNRCON.NS',
+  'NMDC':'NMDC.NS','Divis Lab':'DIVISLAB.NS','Caplin Point':'CAPLIPOINT.NS',
+  'HAL':'HAL.NS','BEL':'BEL.NS','Mazagon Dock':'MAZDOCK.NS','Data Patterns':'DATAPATTNS.NS',
+  'Brigade Enterprises':'BRIGADE.NS','NTPC':'NTPC.NS','Power Grid':'POWERGRID.NS',
+  'Bajaj Finance':'BAJFINANCE.NS','Cholamandalam':'CHOLAFIN.NS','Schaeffler India':'SCHAEFFLER.NS',
+  'Paras Defence':'PARAS.NS','Route Mobile':'ROUTE.NS','Happiest Minds':'HAPPSTMNDS.NS',
+  'Zomato':'ZOMATO.NS',
+};
+
+function calcSMA(closes, n) {
+  if (!closes || closes.length < n) return null;
+  return +(closes.slice(-n).reduce((a, b) => a + b, 0) / n).toFixed(2);
+}
+function calcEMA(closes, n) {
+  if (!closes || closes.length < n) return null;
+  const k = 2 / (n + 1);
+  let ema = closes.slice(0, n).reduce((a, b) => a + b, 0) / n;
+  for (let i = n; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+  return +ema.toFixed(2);
+}
+
+const cache = new Map();
+const TTL   = 10 * 60 * 1000;
+
+export async function fetchYahoo(stockName) {
+  const sym = YAHOO_SYM[stockName];
+  if (!sym) return null;
+
+  const hit = cache.get(sym);
+  if (hit && Date.now() - hit.ts < TTL) return hit.data;
+
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=3mo`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    const json = await res.json();
+    const r    = json?.chart?.result?.[0];
+    if (!r) throw new Error('No result');
+
+    const meta   = r.meta;
+    const quotes = r.indicators?.quote?.[0] || {};
+    const closes = (quotes.close  || []).filter(x => x != null);
+    const vols   = (quotes.volume || []).filter(x => x != null);
+
+    const data = {
+      px:   +(meta.regularMarketPrice || meta.previousClose || 0).toFixed(2),
+      prev: +(meta.previousClose || 0).toFixed(2),
+      chg:  +(meta.regularMarketChangePercent || 0).toFixed(2),
+      vol:  meta.regularMarketVolume || vols[vols.length - 1] || 0,
+      pvol: vols[vols.length - 2] || 0,
+      h52:  +(meta.fiftyTwoWeekHigh || 0).toFixed(2),
+      l52:  +(meta.fiftyTwoWeekLow  || 0).toFixed(2),
+      dayH: +(meta.regularMarketDayHigh || 0).toFixed(2),
+      dayL: +(meta.regularMarketDayLow  || 0).toFixed(2),
+      s10:  calcSMA(closes, 10), s20: calcSMA(closes, 20),
+      e10:  calcEMA(closes, 10), e20: calcEMA(closes, 20),
+      sym, live: true, source: 'Yahoo Finance',
+    };
+
+    cache.set(sym, { data, ts: Date.now() });
+    return data;
+  } catch (e) {
+    console.warn('[Yahoo] fetch failed for', sym, e.message);
+    return null;
+  }
+}

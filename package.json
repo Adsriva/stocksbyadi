@@ -1,0 +1,57 @@
+import { tdStr } from '@/utils/formatters';
+
+/**
+ * Fetch latest news for a stock using Claude AI + web search.
+ * Returns structured JSON with news items, catalysts, risks.
+ */
+export async function fetchStockNews(stock) {
+  const prompt = `You are a financial news analyst covering Indian equity markets.
+Search for the latest news about "${stock.name}" (${stock.sector}${stock.subSector ? ' > ' + stock.subSector : ''}).
+
+Return ONLY valid JSON (no markdown, no extra text):
+{
+  "fetchedAt": "${tdStr()}",
+  "headline": "One-line summary of most important development",
+  "sentiment": "Positive",
+  "items": [
+    {
+      "title": "headline",
+      "category": "Order Win",
+      "date": "12 Jun 2025",
+      "summary": "2-3 sentence factual summary",
+      "impact": "Positive",
+      "source": "BSE Filing"
+    }
+  ],
+  "catalysts": ["upcoming catalyst 1", "upcoming catalyst 2"],
+  "riskEvents": ["risk 1", "risk 2"]
+}
+
+sentiment and impact must be exactly: "Positive", "Neutral", or "Negative"
+category must be one of: "Corporate Action","Results","Order Win","Management","Sector News","Analyst","General"
+Return 4-6 news items. Be specific and factual to Indian markets.`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!res.ok) throw new Error('API ' + res.status);
+  const d = await res.json();
+  const txt = d.content
+    .filter(x => x.type === 'text')
+    .map(x => x.text)
+    .join('')
+    .replace(/```json\n?|```\n?/g, '')
+    .trim();
+  return JSON.parse(txt);
+}
